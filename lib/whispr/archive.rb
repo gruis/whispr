@@ -77,12 +77,8 @@ class Whispr
     def slurp
       o_pos = @whisper.fh.pos
       @whisper.fh.pos = @offset
-      data = @whisper.fh.read(@size)
-      @points.times.map do |i|
-        ts, v = data.unpack(POINT_FMT)
-        data = data[POINT_SIZE..-1]
-        [i, ts, v]
-      end
+      data = @whisper.fh.read(@size).unpack(POINT_FMT * @points)
+      @points.times.map { |i| [i, data.shift, data.shift] }
     ensure
       @whisper.fh.pos = o_pos
     end
