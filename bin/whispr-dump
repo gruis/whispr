@@ -1,0 +1,34 @@
+#!/usr/bin/env ruby
+
+require "whispr"
+require "stringio"
+
+if ARGV[0].nil? || ARGV[0] == "-"
+  data = StringIO.new(STDIN.read)
+else
+  abort("data file #{ARGV[0]} does not exist") unless File.exist?(ARGV[0])
+  data = File.open(ARGV[0], "r")
+end 
+
+whisper = Whispr.new(data)
+
+puts "Meta data:"
+puts "  aggregation method: #{whisper.info[:aggregationMethod]}"
+puts "  max retention: #{whisper.info[:maxRetention]}"
+puts "  xFilesFactor: #{whisper.info[:xFilesFactor]}"
+
+whisper.archives.each.with_index do |archive, i|
+  puts "\nArchive #{i} info:"
+  puts "  offset #{archive.offset}"
+  puts "  seconds per point #{archive.spp}"
+  puts "  points #{archive.points}"
+  puts "  retention #{archive.retention}"
+  puts "  size #{archive.size}"
+end
+
+whisper.archives.each.with_index do |archive, i|
+  puts "\nArchive #{i} data: "
+  archive.to_enum.each do |point, timestamp, value|
+    puts sprintf("#{point}, #{timestamp}, %10.35g", value)
+  end
+end

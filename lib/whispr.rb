@@ -1,4 +1,5 @@
 require 'whispr/version'
+require 'whispr/archive'
 require 'stringio'
 
 class Whispr
@@ -30,14 +31,24 @@ class Whispr
     :min
   ].freeze
 
+  # @return [File, StringIO] file handle of the whisper file
+  attr_reader :fh
 
   def initialize(file)
     @fh = file.is_a?(File) || file.is_a?(StringIO) ? file : File.open(file, 'r')
     @fh.binmode
   end
 
-  def info
-    read_header
+  # @return [Hash]
+  def header
+    @header ||= read_header
+  end
+  alias :info :header
+
+  # @return [Array] Archives
+  # @see Whispr::Archive
+  def archives
+    @archives ||= info[:archives].map { |a| Archive.new(self, a) }
   end
 
 private
@@ -71,6 +82,4 @@ private
       :archives          => archives
     }
   end
-
-
 end
