@@ -1,3 +1,4 @@
 0.0.0
-- support for whispr-dump
-- support for whispr-info
+- support whispr-fetch
+- support whispr-dump
+- support whispr-info

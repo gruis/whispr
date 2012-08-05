@@ -82,5 +82,74 @@ class Whispr
     ensure
       @whisper.fh.pos = o_pos
     end
+
+    # Retrieve values for a time period from an archive within a whisper file
+    #
+    # The return value will be a two element Array.  The first element will be
+    # a three element array containing the start time, end time and step. The
+    # second element will be a N element array containing each value at each
+    # step period.
+    #
+    # @see Whispr#fetch
+    def fetch(fromTime, untilTime)
+      fromInterval  = (fromTime - (fromTime % spp)) + spp
+      untilInterval = (untilTime - (untilTime % spp)) + spp
+      o_pos         = @whisper.fh.pos
+      begin
+        @whisper.fh.seek(offset)
+        baseInterval, baseValue = @whisper.fh.read(POINT_SIZE).unpack(POINT_FMT)
+        if baseInterval == 0
+          step     = spp
+          points   = (untilInterval - fromInterval) / step
+          timeInfo = [fromInterval, untilInterval, step]
+          return [timeInfo, points.times.map{}]
+        end
+
+        # Determine fromOffset
+        timeDistance  = fromInterval - baseInterval
+        pointDistance = timeDistance / spp
+        byteDistance  = pointDistance * POINT_SIZE
+        fromOffset    = offset + (byteDistance % size)
+
+        # Determine untilOffset
+        timeDistance  = untilInterval - baseInterval
+        pointDistance = timeDistance / spp
+        byteDistance  = pointDistance * POINT_SIZE
+        untilOffset   = offset + (byteDistance % size)
+
+        # Reall all the points in the interval
+        @whisper.fh.seek(fromOffset)
+        if fromOffset < untilOffset
+          # we don't wrap around the archive
+          series = @whisper.fh.read(untilOffset - fromOffset)
+        else
+          # we wrap around the archive, so we need two reads
+          archiveEnd  = offset + size
+          series      = @whisper.fh.read(archiveEnd - fromOffset)
+          @whisper.fh.seek(offset)
+          series     += @whisper.fh.read(untilOffset - offset)
+        end
+
+        points          = series.length / POINT_SIZE
+        series          = series.unpack(POINT_FMT * points)
+        currentInterval = fromInterval
+        step            = spp
+        valueList       = points.times.map{}
+        (0..series.length).step(2) do |i|
+          pointTime = series[i]
+          if pointTime == currentInterval
+            pointValue     = series[i+1]
+            valueList[i/2] = pointValue
+          end
+          currentInterval += step
+        end
+
+        timeInfo = [fromInterval, untilInterval, step]
+      ensure
+        @whisper.fh.pos = o_pos
+      end
+      [timeInfo, valueList]
+    end
+
   end
 end

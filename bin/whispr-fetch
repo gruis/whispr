@@ -1,0 +1,39 @@
+#!/usr/bin/env ruby
+
+require "whispr"
+require "stringio"
+require "optparse"
+require "json"
+
+options = {:from => Time.new - 86400, :until => Time.new}
+OptionParser.new do |opts|
+  opts.on("--from Integer", "Unix epoch time of the beginning of your requested interval (default: 24 hours ago") do |f|
+    options[:from] = Time.at(f.to_i)
+  end
+  opts.on("--until Integer", "Unix epoch time of the end of your requested interval (default: now)") do |u|
+    options[:until] = Time.at(u.to_i)
+  end
+  opts.on("--pretty", "Show human-readable timestamps instead of unix times") { options[:pretty] = true }
+  opts.on("--json", "Output results in JSON form") { options[:json] = true }
+end.parse!
+
+if ARGV[0].nil? || ARGV[0] == "-"
+  data = StringIO.new(STDIN.read)
+else
+  abort("data file #{ARGV[0]} does not exist") unless File.exist?(ARGV[0])
+  data = File.open(ARGV[0], "r")
+end 
+
+
+(start_t, end_t, step), values = Whispr.new(data).fetch(options[:from], options[:until])
+if options[:json]
+  puts JSON.dump({:start => start_t, :end => end_t, :step => step, :values => values })
+else
+  t = start_t
+  values.each do |value|
+    time = options[:pretty] ? Time.at(t) : t
+    value = value ? sprintf("%f", value) : 'None'
+    puts "#{time}\t#{value}"
+    t += step
+  end
+end

@@ -14,6 +14,7 @@ class Whispr
     end
   end
   class CorruptWhisprFile < WhisprError; end
+  class InvalidTimeInterval < WhisprError; end
 
   METADATA_FMT      = "NNgN"
   METADATA_SIZE     = 16
@@ -51,7 +52,33 @@ class Whispr
     @archives ||= info[:archives].map { |a| Archive.new(self, a) }
   end
 
+
+  # Retrieve values from a whisper file within the given time window.
+  #
+  # The most appropriate archive within the whisper file will be chosen. The
+  # return value will be a two element Array.  The first element will be a
+  # three element array containing the start time, end time and step. The
+  # second element will be a N element array containing each value at each
+  # step period.
+  #
+  # @see Archive#fetch
+  def fetch(fromTime, untilTime = Time.new)
+    fromTime  = fromTime.to_i
+    untilTime = untilTime.to_i
+    now       = Time.now.to_i
+    oldest    = header[:maxRetention]
+    fromTime  = oldest if fromTime < oldest
+    raise InvalidTimeInterval.new("Invalid time interval") unless fromTime < untilTime
+    untilTime = now if untilTime > now || untilTime < fromTime
+
+    diff    = now - fromTime
+    archive = archives.find{|a| a.retention >= diff }
+    return archive.fetch(fromTime, untilTime)
+  end
+
+
 private
+
 
   def read_header
     o_pos = @fh.pos
