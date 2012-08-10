@@ -151,5 +151,70 @@ class Whispr
       [timeInfo, valueList]
     end
 
+    def update_many(points)
+      step = spp
+      alignedPoints = points.map { |ts, v| [(ts - (ts % step)), v] }
+      # Create a packed string for each contiguous sequence of points
+      packedStrings    = []
+      previousInterval = nil
+      currentString    = ''
+      alignedPoints.each do |interval, value|
+        next if interval == previousInterval
+        if previousInterval.nil? || (interval == previousInterval + step)
+          currentString   += [interval, value].pack(POINT_FMT)
+        else
+          numberOfPoints = currentString.length / POINT_SIZE
+          startInterval  = previousInterval - (step * (numberOfPoints - 1))
+          packedStrings << [startInterval, currentString]
+          currentString  = [interval, value].pack(POINT_FMT)
+        end
+        previousInterval = interval
+      end
+      if !currentString.empty?
+        numberOfPoints = currentString.length / POINT_SIZE
+        startInterval = previousInterval - (step * (numberOfPoints - 1))
+        packedStrings << [startInterval, currentString]
+      end
+
+      # Read base point and determine where our writes will start
+      @whisper.fh.seek(offset)
+      baseInterval, baseValue = @whisper.fh.read(POINT_SIZE).unpack(POINT_FMT)
+      baseInterval = packedStrings[0][0] if baseInterval == 0
+      packedStrings.each do |interval, packedString|
+        timeDistance = interval - baseInterval
+        pointDistance = timeDistance / step
+        byteDistance = pointDistance * POINT_SIZE
+        myOffset = offset + (byteDistance % size)
+        @whisper.fh.seek(myOffset)
+        archiveEnd = offset + size
+        bytesBeyond = (myOffset + packedString.length) - archiveEnd
+
+        if bytesBeyond > 0
+          @whisper.fh.write(packedString[0..-bytesBeyond])
+          if(@whisper.fh.pos != archiveEnd)
+            raise ArchiveBoundaryExceeded.new("archiveEnd=#{archiveEnd} pos=#{@whisper.fh.pos} bytesBeyond=#{bytesBeyond} len(packedString)=#{packedString.length}")
+          end
+          @whisper.fh.seek(offset)
+          @whisper.fh.write(packedString[-bytesBeyond..-1])
+        else
+          @whisper.fh.write(packedString)
+        end
+      end # interval, packedString|
+
+      # Now we propagate the updates to the lower-precision archives
+      higher = self
+      @whisper.archives.select{|a| a.spp > spp }.each do |lower|
+        lowerIntervals = alignedPoints.map{|p| p[0] - (p[0] % lower.spp) }
+        propagateFurther = false
+        lowerIntervals.uniq.each do |interval|
+          propagateFuther = @whisper.send(:propagate, interval, higher, lower)
+        end
+        break unless propagateFurther
+        higher = lower
+      end
+    end
+
+
+
   end
 end

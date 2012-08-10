@@ -1,0 +1,23 @@
+#!/usr/bin/env ruby
+
+require "whispr"
+require "stringio"
+
+points = ARGV.select{|e| e.include?(":") }
+if points.empty?
+  puts "#{File.basename($0)} path timestamp:value [timestamp:value]*"
+  exit -1
+end
+
+file   = ARGV - points
+if file.empty? || file == "-"
+  data = StringIO.new(STDIN.read, "r+")
+else
+  abort("data file #{file[0]} does not exist") unless File.exist?(file[0])
+  data = File.open(file[0], "r+")
+end 
+
+now    = Time.now.to_i
+points = points.map{|p| p.split(":") }.map{|t,v| [t == 'N' ? now : t.to_i, v.to_f] }
+
+Whispr.new(data).update(*points)

@@ -15,6 +15,9 @@ class Whispr
   end
   class CorruptWhisprFile < WhisprError; end
   class InvalidTimeInterval < WhisprError; end
+  class TimestampNotCovered < WhisprError; end
+  class InvalidAggregationMethod < WhisprError; end
+  class ArchiveBoundaryExceeded < WhisprError; end
 
   METADATA_FMT      = "NNgN"
   METADATA_SIZE     = 16
@@ -35,9 +38,13 @@ class Whispr
   # @return [File, StringIO] file handle of the whisper file
   attr_reader :fh
 
-  def initialize(file)
-    @fh = file.is_a?(File) || file.is_a?(StringIO) ? file : File.open(file, 'r')
+  attr_accessor :auto_flush
+  alias :auto_flush? :auto_flush
+
+  def initialize(file, auto_flush = true)
+    @fh = file.is_a?(File) || file.is_a?(StringIO) ? file : File.open(file, 'r+')
     @fh.binmode
+    @auto_flush = auto_flush
   end
 
   # @return [Hash]
@@ -76,6 +83,15 @@ class Whispr
     return archive.fetch(fromTime, untilTime)
   end
 
+  def update(*points)
+    return if points.empty?
+    # TODO lock the file
+    if points.length == 1
+      update_one(points[0][1], points[0][0])
+    else
+      update_many(points)
+    end
+  end
 
 private
 
@@ -109,4 +125,179 @@ private
       :archives          => archives
     }
   end
+
+  def update_one(value, timestamp = nil)
+    now       = Time.new.to_i
+    timestamp = now if timestamp.nil?
+    diff      = now - timestamp
+    if !(diff < header[:maxRetention] && diff >= 0)
+      raise TimestampNotCovered, "Timestamp not covered by any archives in this database"
+    end
+
+    aidx = (0 ... archives.length).find { |i| archives[i].retention > diff }
+    archive       = archives[aidx]
+    lowerArchives = archives[aidx + 1 .. - 1]
+
+    myInterval    = timestamp - (timestamp % archive.spp)
+    myPackedPoint = [myInterval, value].pack(POINT_FMT)
+    @fh.seek(archive.offset)
+    baseInterval, baseValue = @fh.read(POINT_SIZE).unpack(POINT_FMT)
+
+    if baseInterval == 0
+      # this file's first update
+      @fh.seek(archive.offset)
+      @fh.write(myPackedPoint)
+      baseInterval, baseValue = myInterval, value
+    else
+      timeDistance  = myInterval - baseInterval
+      pointDistance = timeDistance / archive.spp
+      byteDistance  = pointDistance * POINT_SIZE
+      myOffset      = archive.offset + (byteDistance % archive.size)
+      @fh.seek(myOffset)
+      @fh.write(myPackedPoint)
+    end
+
+    higher = archive
+    lowerArchives.each do |lower|
+      break unless propagate(myInterval, higher, lower)
+      higher = lower
+    end
+
+    @fh.flush if auto_flush?
+  end
+
+  def update_many(points)
+    # order points by timestamp, newest first
+    points   = points.map{|ts, v| [ts.to_i, v.to_f ] }.sort {|b,a| a[0] <=> b[0] }
+    now            = Time.new.to_i
+    archives       = self.archives.to_enum
+    currentArchive = archives.next
+    currentPoints  = []
+    points.each do |point|
+      age = now - point[0]
+      while currentArchive.retention < age
+        unless currentPoints.empty?
+          currentPoints.reverse! # put points in chronological order
+          currentArchive.update_many(currentPoints)
+          currentPoints = []
+        end
+        begin
+          currentArchive = archives.next
+        rescue StopIteration
+          currentArchive = nil
+          break
+        end
+      end
+      # drop remaining points that don't fit in the database
+      break unless currentArchive
+
+      currentPoints << point
+    end
+
+    if currentArchive && !currentPoints.empty?
+      # don't forget to commit after we've checked all the archives
+      currentPoints.reverse!
+      currentArchive.update_many(currentPoints)
+    end
+
+    @fh.flush if auto_flush?
+  end
+
+  def propagate(timestamp, higher, lower)
+    aggregationMethod = header[:aggregationMethod]
+    xff               = header[:xFilesFactor]
+
+    lowerIntervalStart = timestamp - (timestamp % lower.spp)
+    lowerIntervalEnd   = lowerIntervalStart + lower.spp
+    @fh.seek(higher.offset)
+    higherBaseInterval, higherBaseValue = @fh.read(POINT_SIZE).unpack(POINT_FMT)
+
+    if higherBaseInterval == 0
+      higherFirstOffset = higher.offset
+     else
+       timeDistance = lowerIntervalStart - higherBaseInterval
+       pointDistance = timeDistance / higher.spp
+       byteDistance  = pointDistance * POINT_SIZE
+       higherFirstOffset = higher.offset + (byteDistance % higher.size)
+    end
+
+    higherPoints        = lower.spp / higher.spp
+    higherSize          = higherPoints * POINT_SIZE
+    relativeFirstOffset = higherFirstOffset - higher.offset
+    relativeLastOffset  = (relativeFirstOffset + higherSize) % higher.size
+    higherLastOffset    = relativeLastOffset + higher.offset
+    @fh.seek(higherFirstOffset)
+
+    if higherFirstOffset < higherLastOffset
+      # don't wrap the archive
+      seriesString = @fh.read(higherLastOffset - higherFirstOffset)
+    else
+      # wrap the archive
+      higherEnd    = higher.offset + higher.size
+      seriesString = @fh.read(higherEnd - higherFirstOffset)
+      @fh.seek(higher.offset)
+      seriesString += @fh.read(higherLastOffset - higher.offset)
+    end
+
+    points         = seriesString.length / POINT_SIZE
+    unpackedSeries = seriesString.unpack(POINT_FMT * points)
+
+    # construct a list of values
+    neighborValues  = points.times.map{}
+    currentInterval = lowerIntervalStart
+    step            = higher.spp
+    (0..unpackedSeries.length).step(2) do |i|
+      pointTime           = unpackedSeries[i]
+      neighborValues[i/2] = unpackedSeries[i+1] if pointTime == currentInterval
+      currentInterval    += step
+    end
+
+    knownValues = neighborValues.select { |v| !v.nil? }
+    return false if knownValues.empty?
+    if (knownValues.length / neighborValues.length).to_f < header[:xFilesFactor]
+      return false
+    end
+
+    # we have enough data to propagate a value
+    aggregateValue = aggregate(aggregationMethod, knownValues)
+    myPackedPoint  = [lowerIntervalStart, aggregateValue].pack(POINT_FMT)
+    @fh.seek(lower.offset)
+    lowerBaseInterval, lowerBaseValue = @fh.read(POINT_SIZE).unpack(POINT_FMT)
+
+    if lowerBaseInterval == 0
+      # first propagated update to this lower archive
+      @fh.seek(lower.offset)
+      @fh.write(myPackedPoint)
+    else
+      timeDistance  = lowerIntervalStart - lowerBaseInterval
+      pointDistance = timeDistance / lower.spp
+      byteDistance  = pointDistance * POINT_SIZE
+      lowerOffset   = lower.offset + (byteDistance % lower.size)
+      @fh.seek(lowerOffset)
+      @fh.write(myPackedPacket)
+    end
+    true
+  end
+
+  def aggregate(aggregationMethod, knownValues)
+    case aggregationMethod
+    when :average
+      (knownVaues.inject(0){|sum, i| sum + i } / knownValues.length).to_f
+    when :sum
+      knownVaues.inject(0){|sum, i| sum + i }
+    when :last
+      knownValues[-1]
+    when :max
+      v  = knownValues[0]
+      knownValues[1..-1].each { |k| v = k if k > v }
+      v
+    when :min
+      v  = knownValues[0]
+      knownValues[1..-1].each { |k| v = k if k < v }
+      v
+    else
+      raise InvalidAggregationMethod, "Unrecognized aggregation method #{aggregationMethod}"
+    end
+  end
+
 end
