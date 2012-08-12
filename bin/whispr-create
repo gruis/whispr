@@ -1,0 +1,34 @@
+#!/usr/bin/env ruby
+
+require "whispr"
+require "optparse"
+
+options    = {:xff => 0.5, :overwrite => false, :aggregationMethod => :average}
+opt_parser = OptionParser.new do |opts|
+  opts.on("--xFilesFactor Float", Float, "default 0.5") { |x| options[:xff] = x }
+  opts.on("--aggregationMethod String", String, "function to use when aggregating values #{Whispr::AGGR_TYPES[1..-1].map(&:to_s).inspect}") do |aggr|
+    aggr = aggr.intern
+    unless Whispr::AGGR_TYPES[1..-1].include?(aggr)
+      $stderr.puts "aggregationMethod must be one of: #{Whispr::AGGR_TYPES[1..-1]}"
+      exit 1
+    end
+    options[:aggregationMethod] = aggr
+  end
+  opts.on("--overwrite") {|o| options[:overwrite] = o }
+  opts.banner += " path timePerPoint:timeToStore [timePerPoint:timeToStore]*"
+end
+opt_parser.parse!
+
+if ARGV.length < 2
+  $stderr.puts opt_parser
+  exit 1
+end
+
+path = ARGV.shift
+unless File.exists?(File.dirname(path))
+  $stderr.puts "#{File.dirname(path)} does not exists"
+  exit 1
+end
+File.unlink if options[:overwrite] && File.exists?(path)
+
+Whispr.create(path, ARGV.map{|a| Whispr.parse_retention_def(a) }, options)

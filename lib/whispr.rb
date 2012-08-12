@@ -35,6 +35,12 @@ class Whispr
     :min
   ].freeze
 
+  class << self
+    def create(path, archiveList, opts = {})
+      opts = {:xff => 0.5, :aggregationMethod => :average, :sparse => false}.merge(opts)
+    end
+  end
+
   # @return [File, StringIO] file handle of the whisper file
   attr_reader :fh
 
