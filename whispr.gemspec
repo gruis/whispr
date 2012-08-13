@@ -10,5 +10,5 @@ Gem::Specification.new do |s|
   s.authors       = ['Caleb Crane']
   s.files         = Dir["lib/**/*.rb", "bin/*", "*.md"]
   s.require_paths = ["lib"]
-  s.executables   = Dir['bin/whisper-info']
+  s.executables   = Dir["bin/*"].map{|f| f.split("/")[-1] }
 end

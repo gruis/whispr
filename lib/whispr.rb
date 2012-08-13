@@ -18,16 +18,20 @@ class Whispr
   class TimestampNotCovered < WhisprError; end
   class InvalidAggregationMethod < WhisprError; end
   class ArchiveBoundaryExceeded < WhisprError; end
+  class ValueError < WhisprError; end
+  class InvalidConfiguration < WhisprError; end
 
-  METADATA_FMT      = "NNgN"
+  LONG_FMT          = "N"
+  METADATA_FMT      = "#{LONG_FMT*2}g#{LONG_FMT}"
   METADATA_SIZE     = 16
-  ARCHIVE_INFO_FMT  = "NNN"
+  ARCHIVE_INFO_FMT  = LONG_FMT * 3
   ARCHIVE_INFO_SIZE =  12
-  POINT_FMT         = "NG"
+  POINT_FMT         = "#{LONG_FMT}G"
   POINT_SIZE        = 12
+  CHUNK_SIZE        = 16384
 
   AGGR_TYPES = [
-    :none,
+    :_,
     :average,
     :sum,
     :last,
@@ -36,8 +40,147 @@ class Whispr
   ].freeze
 
   class << self
+
+    def unitMultipliers
+      @unitMultipliers ||= {
+        's' => 1,
+        'm' => 60,
+        'h' => 3600,
+        'd' => 86400,
+        'w' => 86400 * 7,
+        'y' => 86400 * 365
+      }
+    end
+
+    def parse_retention_def(rdef)
+      (precision, points) = rdef.strip.split(':')
+      if precision.to_i.to_s == precision
+        precision = precision.to_i * unitMultipliers['s']
+      else
+        _, precision, unit = precision.split(/([\d]+)/)
+        unit = 's' unless unit
+        raise ValueError.new("Invalid precision specification unit #{unit}") unless unitMultipliers[unit[0]]
+        precision = precision.to_i * unitMultipliers[unit[0]]
+      end
+
+      if points.to_i.to_s == points
+        points = points.to_i
+      else
+        _, points, unit = points.split(/([\d]+)/)
+        raise ValueError.new("Invalid retention specification unit #{unit}") unless unitMultipliers[unit[0]]
+        points = points.to_i * unitMultipliers[unit[0]] / precision
+      end
+
+      [precision, points]
+    end
+
+    # Create whipser file.
+    # @param [String] path
+    # @param [Array] archiveList each archive is an array with two elements: [secondsPerPoint,numberOfPoints]
+    # @param [Hash] opts
+    # @option opts [Float] :xff the fraction of data points in a propagation interval that must have known values for a propagation to occur
+    # @option opts [Symbol] :aggregationMethod the function to use when propogating data; must be one of AGGR_TYPES[1..-1]
+    # @option opts [Boolean] :overwrite (false)
+    # @raise [InvalidConfiguration] if the archiveList is inavlid, or if 'path' exists and :overwrite is not true
+    # @see Whsipr.validateArchiveList
     def create(path, archiveList, opts = {})
-      opts = {:xff => 0.5, :aggregationMethod => :average, :sparse => false}.merge(opts)
+      opts = {:xff => 0.5, :aggregationMethod => :average, :sparse => false, :overwrite => false}.merge(opts)
+      unless AGGR_TYPES[1..-1].include?(opts[:aggregationMethod])
+        raise InvalidConfiguration.new("aggregationMethod must be one of #{AGGR_TYPES[1..-1]}")
+      end
+
+      validateArchiveList!(archiveList)
+      raise InvalidConfiguration.new("File #{path} already exists!") if File.exists?(path) && !opts[:overwrite]
+
+      # if file exists it will be truncated
+      File.open(path, "wb")  do |fh|
+        fh.flock(File::LOCK_EX)
+        aggregationType = AGGR_TYPES.index(opts[:aggregationMethod])
+        oldest         = archiveList.map{|spp, points| spp * points }.sort.last
+        packedMetadata = [aggregationType, oldest, opts[:xff], archiveList.length].pack(METADATA_FMT)
+        fh.write(packedMetadata)
+        headerSize            = METADATA_SIZE + (ARCHIVE_INFO_SIZE * archiveList.length)
+        archiveOffsetPointer = headerSize
+        archiveList.each do |spp, points|
+          archiveInfo = [archiveOffsetPointer, spp, points].pack(ARCHIVE_INFO_FMT)
+          fh.write(archiveInfo)
+          archiveOffsetPointer += (points * POINT_SIZE)
+        end
+
+        if opts[:sparse]
+          fh.seek(archiveOffsetPointer - headerSize - 1)
+          fh.write("\0")
+        else
+          remaining = archiveOffsetPointer - headerSize
+          zeroes = "\x00" * CHUNK_SIZE
+          while remaining > CHUNK_SIZE
+            fh.write(zeroes)
+            remaining -= CHUNK_SIZE
+          end
+          fh.write(zeroes[0..remaining])
+        end
+
+        fh.flush
+        fh.fsync rescue nil
+      end
+
+      new(path)
+    end
+
+    # Is the provided archive list valid?
+    # @return [Boolean] true, false
+    def validArchiveList?(archiveList)
+      !(!!(validateArchiveList!(archiveList) rescue true))
+    end
+
+    # Validate an archive list without raising an exception
+    # @return [NilClass, InvalidConfiguration]
+    def validateArchiveList(archiveList)
+      validateArchiveList!(archiveList) rescue $!
+    end
+
+    # Validate an archive list
+    # An ArchiveList must:
+    # 1. Have at least one archive config. Example: [60, 86400]
+    # 2. No archive may be a duplicate of another.
+    # 3. Higher precision archives' precision must evenly divide all lower precision archives' precision.
+    # 4. Lower precision archives must cover larger time intervals than higher precision archives.
+    # 5. Each archive must have at least enough points to consolidate to the next archive
+    # @raise [InvalidConfiguration]
+    # @return [nil]
+    def validateArchiveList!(archiveList)
+      raise InvalidConfiguration.new("you must specify at least on archive configuration") if Array(archiveList).empty?
+      archiveList = archiveList.sort{|a,b| a[0] <=> b[0] }
+      archiveList[0..-2].each_with_index do |archive, i|
+        nextArchive = archiveList[i+1]
+        unless archive[0] < nextArchive[0]
+          raise InvalidConfiguration.new("A Whipser database may not be configured " +
+            "having two archives with the same precision " +
+            "(archive#{i}: #{archive}, archive#{i+1}: #{nextArchive})")
+        end
+        unless nextArchive[0] % archive[0] == 0
+          raise InvalidConfiguration.new("Higher precision archives' precision must " +
+            "evenly divide all lower precision archives' precision " +
+            "(archive#{i}: #{archive}, archive#{i+1}: #{nextArchive})")
+        end
+
+        retention = archive[0] * archive[1]
+        nextRetention = nextArchive[0] * nextArchive[1]
+        unless nextRetention > retention
+          raise InvalidConfiguration.new("Lower precision archives must cover larger " +
+            "time intervals than higher precision archives " +
+            "(archive#{i}: #{archive[1]}, archive#{i + 1}:, #{nextArchive[1]})")
+        end
+
+        archivePoints = archive[1]
+        pointsPerConsolidation = nextArchive[0] / archive[0]
+        unless archivePoints >= pointsPerConsolidation
+          raise InvalidConfiguration.new("Each archive must have at least enough points " +
+            "to consolidate to the next archive (archive#{i+1} consolidates #{pointsPerConsolidation} of " +
+            "archive#{i}'s points but it has only #{archivePoints} total points)")
+        end
+      end
+      nil
     end
   end
 
@@ -89,6 +232,9 @@ class Whispr
     return archive.fetch(fromTime, untilTime)
   end
 
+  # Update one or many points
+  # Each element of the points list should be a two dimensional Array where
+  # the first element is a timestamp and the second element is a value.
   def update(*points)
     return if points.empty?
     # TODO lock the file
@@ -137,7 +283,7 @@ private
     timestamp = now if timestamp.nil?
     diff      = now - timestamp
     if !(diff < header[:maxRetention] && diff >= 0)
-      raise TimestampNotCovered, "Timestamp not covered by any archives in this database"
+      raise TimestampNotCovered, "Timestamp (#{timestamp}) not covered by any archives in this database"
     end
 
     aidx = (0 ... archives.length).find { |i| archives[i].retention > diff }
@@ -280,7 +426,7 @@ private
       byteDistance  = pointDistance * POINT_SIZE
       lowerOffset   = lower.offset + (byteDistance % lower.size)
       @fh.seek(lowerOffset)
-      @fh.write(myPackedPacket)
+      @fh.write(myPackedPoint)
     end
     true
   end
@@ -288,9 +434,9 @@ private
   def aggregate(aggregationMethod, knownValues)
     case aggregationMethod
     when :average
-      (knownVaues.inject(0){|sum, i| sum + i } / knownValues.length).to_f
+      (knownValues.inject(0){|sum, i| sum + i } / knownValues.length).to_f
     when :sum
-      knownVaues.inject(0){|sum, i| sum + i }
+      knownValues.inject(0){|sum, i| sum + i }
     when :last
       knownValues[-1]
     when :max

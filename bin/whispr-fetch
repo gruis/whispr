@@ -8,9 +8,15 @@ require "json"
 options = {:from => Time.new - 86400, :until => Time.new}
 OptionParser.new do |opts|
   opts.on("--from Integer", "Unix epoch time of the beginning of your requested interval (default: 24 hours ago") do |f|
+    if ["n", "N"].include?(f[0])
+      f = Time.new + f[1..-1].to_i
+    end
     options[:from] = Time.at(f.to_i)
   end
   opts.on("--until Integer", "Unix epoch time of the end of your requested interval (default: now)") do |u|
+    if ["n", "N"].include?(u[0])
+      u = Time.new + u[1..-1].to_i
+    end
     options[:until] = Time.at(u.to_i)
   end
   opts.on("--pretty", "Show human-readable timestamps instead of unix times") { options[:pretty] = true }
