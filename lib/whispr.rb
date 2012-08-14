@@ -53,6 +53,7 @@ class Whispr
     end
 
     def parse_retention_def(rdef)
+      raise ArgumentError.new("precision and points must be separated by a ':'") unless rdef && rdef.include?(":")
       (precision, points) = rdef.strip.split(':')
       if precision.to_i.to_s == precision
         precision = precision.to_i * unitMultipliers['s']
