@@ -1,4 +1,6 @@
-0.0.0
+0.0.1
+- support whispr-create
+- support whispr-update
 - support whispr-fetch
 - support whispr-dump
 - support whispr-info

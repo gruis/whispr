@@ -12,4 +12,24 @@ describe Whispr do
     end
   end
 
+  it { Whispr.should respond_to :validArchiveList? }
+  describe "Whispr.validArchiveList?" do
+    pending
+  end
+
+  it { Whispr.should respond_to :validateArchiveList }
+  describe "Whispr.validateArchiveList" do
+    pending
+  end
+
+  it { Whispr.should respond_to :validateArchiveList! }
+  describe "Whispr.validateArchiveList!" do
+    pending
+  end
+
+  it { Whispr.should respond_to :create }
+  describe "Whispr.create"  do
+    pending
+  end
+
 end
