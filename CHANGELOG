@@ -1,4 +1,5 @@
 0.0.2
+- fixes: Whispr#propogate uses floats when checking xFilesFactor
 - fixes: when Archive#fetch is called with a fromTime that is outside of the archive fromTime will be properly adjusted to the oldest available timestamp
 
 0.0.1

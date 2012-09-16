@@ -368,9 +368,9 @@ private
     if higherBaseInterval == 0
       higherFirstOffset = higher.offset
      else
-       timeDistance = lowerIntervalStart - higherBaseInterval
-       pointDistance = timeDistance / higher.spp
-       byteDistance  = pointDistance * POINT_SIZE
+       timeDistance      = lowerIntervalStart - higherBaseInterval
+       pointDistance     = timeDistance / higher.spp
+       byteDistance      = pointDistance * POINT_SIZE
        higherFirstOffset = higher.offset + (byteDistance % higher.size)
     end
 
@@ -407,7 +407,7 @@ private
 
     knownValues = neighborValues.select { |v| !v.nil? }
     return false if knownValues.empty?
-    if (knownValues.length / neighborValues.length).to_f < header[:xFilesFactor]
+    if (knownValues.length.to_f / neighborValues.length.to_f) < header[:xFilesFactor]
       return false
     end
 
