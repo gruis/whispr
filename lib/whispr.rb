@@ -238,6 +238,9 @@ class Whispr
   # the first element is a timestamp and the second element is a value.
   def update(*points)
     return if points.empty?
+
+    (points = points[0]) if points.length == 1 && points[0].is_a?(Array)
+
     # TODO lock the file
     if points.length == 1
       update_one(points[0][1], points[0][0])
