@@ -237,8 +237,13 @@ class Whispr
   # Each element of the points list should be a two dimensional Array where
   # the first element is a timestamp and the second element is a value.
   def update(*points)
-    (points = points[0]) if points.length == 1 && points[0].is_a?(Array)
-    return if points.empty?
+    if points[0].is_a?(Array)
+      # Cover the least exhaustive, and most likely, nested array check first
+      points = points.length == 1 ? points[0] : points.flatten
+    elsif points.any? { |p| p.is_a?(Array) }
+      points = points.flatten
+    end
+    return if points.empty? || points.length % 2 != 0
 
     # TODO lock the file
     if points.length == 2
