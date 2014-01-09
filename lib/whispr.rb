@@ -241,8 +241,8 @@ class Whispr
     return if points.empty?
 
     # TODO lock the file
-    if points.length == 1
-      update_one(points[0][1], points[0][0])
+    if points.length == 2
+      update_one(points[1], points[0])
     else
       update_many(points)
     end
