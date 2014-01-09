@@ -1,5 +1,5 @@
 0.0.3
-- fixes: branch test and call to #update_one from #udpate_many
+- fixes: branch test and call to #update_one from #update
 - [1](https://github.com/simulacre/whispr/pull/1): allows passing array to #update [ovesh](https://github.com/ovesh)
 
 0.0.2
