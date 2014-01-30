@@ -253,6 +253,10 @@ class Whispr
     end
   end
 
+  def close
+    @fh.close
+  end
+
 private
 
 
