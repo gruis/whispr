@@ -254,7 +254,7 @@ class Whispr
     now       = Time.now.to_i
     oldest    = now - header[:maxRetention]
     fromTime  = oldest if fromTime < oldest
-    raise InvalidTimeInterval.new("Invalid time interval") unless fromTime < untilTime
+    raise InvalidTimeInterval.new("Invalid time interval (untilTime=#{untilTime}, fromTime=#{fromTime})") unless fromTime < untilTime
     untilTime = now if untilTime > now || untilTime < fromTime
 
     diff    = now - fromTime
@@ -367,7 +367,7 @@ private
 
   def update_many(points)
     # order points by timestamp, newest first
-    points   = points.map{|ts, v| [ts.to_i, v.to_f ] }.sort {|b,a| a[0] <=> b[0] }
+    points   = points.each_slice(2).map{|ts, v| [ts.to_i, v.to_f ] }.sort {|b,a| a[0] <=> b[0] }
     now            = Time.new.to_i
     archives       = self.archives.to_enum
     currentArchive = archives.next

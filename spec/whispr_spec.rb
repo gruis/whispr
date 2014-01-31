@@ -32,6 +32,155 @@ describe Whispr do
     pending
   end
 
+  context "updating values" do
+    let(:archive) do
+      Whispr.create('a.wsp', '30s:6h'.split(/\s/).map{|r| Whispr.parse_retention_def(r) },
+                    :xff => 0.5, :aggregationMethod => :average)
+    end
+    let(:now) { Time.now.to_i }
+    subject { archive }
+    after(:each) { File.delete('a.wsp') }
+
+    context "when passing no arguments" do
+      it "should not update values" do
+        archive.update()
+        vals = archive.fetch(now - 200)
+        vals[1].compact.should be_empty
+      end
+    end
+
+    context "passing a single item list" do
+      it "should not update values" do
+        archive.update(now - 90)
+        vals = archive.fetch(now - 200)
+        vals[1].compact.should be_empty
+      end
+    end
+
+    context "passing two item list" do
+      it "should update values" do
+        archive.update(now - 90, 10)
+        vals = archive.fetch(now - 200)
+        vals[1].should include(10.0)
+      end
+    end
+
+    context "passing a three item list" do
+      it "should not update values" do
+        archive.update(now - 90, 10, now - 30)
+        vals = archive.fetch(now - 200)
+        vals[1].compact.should be_empty
+      end
+    end
+
+    context "passing a four item list" do
+      it "should update values" do
+        archive.update(now - 90, 10, now - 30, 20)
+        vals = archive.fetch(now - 200)
+        vals[1].should include(10.0, 20.0)
+      end
+    end
+
+    context "passing an array" do
+      context "with two elements" do
+        it "should update values" do
+          archive.update([now - 90, 10])
+          vals = archive.fetch(now - 200)
+          vals[1].should include(10.0)
+        end
+      end
+      context "with four elements" do
+        it "should update values" do
+          archive.update([now - 90, 10, now - 30, 20])
+          vals = archive.fetch(now - 200)
+          vals[1].should include(10.0, 20.0)
+        end
+      end
+      context "with a single element" do
+        it "should not update values" do
+          archive.update([now - 90])
+          vals = archive.fetch(now - 200)
+          vals[1].compact.should be_empty
+        end
+      end
+
+      context "with three elements" do
+        it "should not update values" do
+          archive.update([now - 90, 10, now - 30])
+          vals = archive.fetch(now - 200)
+          vals[1].compact.should be_empty
+        end
+      end
+
+      context "with no elements" do
+        it "should not update values" do
+          archive.update([])
+          vals = archive.fetch(now - 200)
+          vals[1].compact.should be_empty
+        end
+      end
+    end
+
+    context "passing an array and a list of elements" do
+      context "when the array is the first element" do
+        it "should update the values with all of the elements" do
+          archive.update([now - 90, 10, now - 60, 20], now - 30, 30)
+          vals = archive.fetch(now - 200)
+          vals[1].should include(10.0, 20.0, 30.0)
+        end
+      end
+
+      context "when the array is the last element" do
+        it "should update the values with all of the elements" do
+          archive.update(now - 90, 10, [now - 60, 20, now - 30, 30])
+          vals = archive.fetch(now - 200)
+          vals[1].should include(10.0, 20.0, 30.0)
+        end
+      end
+
+      context "when the array is in the middle" do
+        it "should update the values with all of the elements" do
+          archive.update(now - 120, 10, [now - 90, 20, now - 60, 30], now - 30, 40)
+          vals = archive.fetch(now - 200)
+          vals[1].should include(10.0, 20.0, 30.0, 40.0)
+        end
+      end
+
+      context "when there is more than one array" do
+        it "should update the values with all of the elements" do
+          archive.update(now - 120, 10, [now - 90, 20], [now - 60, 30], now - 30, 40)
+          vals = archive.fetch(now - 200)
+          vals[1].should include(10.0, 20.0, 30.0, 40.0)
+        end
+      end
+
+      context "the number of elements plus the array is an odd number" do
+        it "should update the values with all of the elements" do
+          archive.update([now - 120, 10, now - 90, 20], now - 60, 30, now - 30, 40)
+          vals = archive.fetch(now - 200)
+          vals[1].should include(10.0, 20.0, 30.0, 40.0)
+        end
+      end
+
+      context "there is an uneven total number of elements" do
+        context "one of the nested arrays is uneven" do
+          it "should not update any of the values" do
+            archive.update(now - 120, 10, [now - 90], [now - 60, 30], now - 30, 40)
+            vals = archive.fetch(now - 200)
+            vals[1].compact.should be_empty
+          end
+        end
+        context "the element list is uneven" do
+          it "should not update any of the values" do
+            archive.update(now - 120, 10, [now - 90, 20], [now - 60, 30], now - 30)
+            vals = archive.fetch(now - 200)
+            vals[1].compact.should be_empty
+          end
+        end
+      end
+    end
+  end
+
   context "opening and closing a whispr archive" do
     let(:archive) do
       archiveList = [[10, 120]]
