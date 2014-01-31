@@ -1,3 +1,8 @@
+0.1.0
+- [2](https://github.com/simulacre/whispr/pull/2): allows closing the filehandle [ovesh](https://github.com/ovesh)
+- IOError caught when reading header will be tagged as Whispr::Error rather than raising Whispr::CorruptWhisprFile
+- support testing Whispr from specs using StringIO objects
+ 
 0.0.3
 - fixes: branch test and call to #update_one from #update
 - [1](https://github.com/simulacre/whispr/pull/1): allows passing array to #update [ovesh](https://github.com/ovesh)
