@@ -32,6 +32,18 @@ describe Whispr do
     pending
   end
 
+  context "updating values" do
+    it "should update values when update is called with multiple arguments" do
+      w = Whispr.create('a.wsp', '30s:6h'.split(/\s/).map{|r| Whispr.parse_retention_def(r) },
+                        :xff => 0.5, :aggregationMethod => :average)
+      now = Time.now.to_i
+      w.update(now - 90, 10, now - 30, 20)
+      vals = w.fetch(now - 200)
+      File.delete('a.wsp')
+      vals[1].should include(10.0)
+    end
+  end
+
   context "opening and closing a whispr archive" do
     let(:archive) do
       archiveList = [[10, 120]]
