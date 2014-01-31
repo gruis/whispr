@@ -254,7 +254,7 @@ class Whispr
     now       = Time.now.to_i
     oldest    = now - header[:maxRetention]
     fromTime  = oldest if fromTime < oldest
-    raise InvalidTimeInterval.new("Invalid time interval") unless fromTime < untilTime
+    raise InvalidTimeInterval.new("Invalid time interval (untilTime=#{untilTime}, fromTime=#{fromTime})") unless fromTime < untilTime
     untilTime = now if untilTime > now || untilTime < fromTime
 
     diff    = now - fromTime
