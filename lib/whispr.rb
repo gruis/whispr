@@ -75,8 +75,48 @@ class Whispr
       [precision, points]
     end
 
-    # Create whipser file.
+    # Create whipser file on the file system and prepopulate it.
     # @param [String] path
+    # @param [Array] archiveList each archive is an array with two elements: [secondsPerPoint,numberOfPoints]
+    # @param [Hash] opts
+    # @option opts [Float] :xff (0.5) the fraction of data points in a propagation interval that must have known values for a propagation to occur
+    # @option opts [Symbol] :aggregationMethod (average) the function to use when propogating data; must be one of AGGR_TYPES[1..-1]
+    # @option opts [Boolean] :overwrite (false)
+    # @option opts [Boolean] :sparse (false)
+    # @raise [InvalidConfiguration] if the archiveList is inavlid, or if 'path' exists and :overwrite is not true
+    # @see Whsipr.validateArchiveList
+    def create(path, archiveList, opts = {})
+      validate_opts(opts)
+      validateArchiveList!(archiveList)
+      raise InvalidConfiguration.new("File #{path} already exists!") if File.exists?(path) && !opts[:overwrite]
+
+      # if file exists it will be truncated
+      File.open(path, "wb")  do |fh|
+        fh.flock(File::LOCK_EX)
+        prepopulate(fh, archiveList, opts)
+      end
+
+      new(path)
+    end
+
+    # Set defaults for the options to #create and #prepopulate as well as validate the supplied options.
+    # @param [Hash] opts
+    # @return [Hash] updated options
+    def validate_opts(opts = {})
+      opts = {:xff => 0.5, :aggregationMethod => :average, :sparse => false, :overwrite => false}.merge(opts)
+      unless AGGR_TYPES[1..-1].include?(opts[:aggregationMethod])
+        raise InvalidConfiguration.new("aggregationMethod must be one of #{AGGR_TYPES[1..-1]}")
+      end
+      opts
+    end
+
+    # Build the header and reserve space for the archives in the Whispr file.
+    #
+    # You probably don't want to use this method, you probably want to use
+    # #create instead. Calls to prepopulate MUST be preceeded by a call to
+    # validateArchiveList! with the archiveList argument.
+    #
+    # @param [File] the filehandle that will hold the archive
     # @param [Array] archiveList each archive is an array with two elements: [secondsPerPoint,numberOfPoints]
     # @param [Hash] opts
     # @option opts [Float] :xff the fraction of data points in a propagation interval that must have known values for a propagation to occur
@@ -84,48 +124,37 @@ class Whispr
     # @option opts [Boolean] :overwrite (false)
     # @raise [InvalidConfiguration] if the archiveList is inavlid, or if 'path' exists and :overwrite is not true
     # @see Whsipr.validateArchiveList
-    def create(path, archiveList, opts = {})
-      opts = {:xff => 0.5, :aggregationMethod => :average, :sparse => false, :overwrite => false}.merge(opts)
-      unless AGGR_TYPES[1..-1].include?(opts[:aggregationMethod])
-        raise InvalidConfiguration.new("aggregationMethod must be one of #{AGGR_TYPES[1..-1]}")
+    # @see Whsipr.create
+    def prepopulate(fh, archiveList, opts = {})
+      opts            = validate_opts(opts)
+      aggregationType = AGGR_TYPES.index(opts[:aggregationMethod])
+      oldest         = archiveList.map{|spp, points| spp * points }.sort.last
+      packedMetadata = [aggregationType, oldest, opts[:xff], archiveList.length].pack(METADATA_FMT)
+      fh.write(packedMetadata)
+      headerSize            = METADATA_SIZE + (ARCHIVE_INFO_SIZE * archiveList.length)
+      archiveOffsetPointer = headerSize
+      archiveList.each do |spp, points|
+        archiveInfo = [archiveOffsetPointer, spp, points].pack(ARCHIVE_INFO_FMT)
+        fh.write(archiveInfo)
+        archiveOffsetPointer += (points * POINT_SIZE)
       end
 
-      validateArchiveList!(archiveList)
-      raise InvalidConfiguration.new("File #{path} already exists!") if File.exists?(path) && !opts[:overwrite]
-
-      # if file exists it will be truncated
-      File.open(path, "wb")  do |fh|
-        fh.flock(File::LOCK_EX)
-        aggregationType = AGGR_TYPES.index(opts[:aggregationMethod])
-        oldest         = archiveList.map{|spp, points| spp * points }.sort.last
-        packedMetadata = [aggregationType, oldest, opts[:xff], archiveList.length].pack(METADATA_FMT)
-        fh.write(packedMetadata)
-        headerSize            = METADATA_SIZE + (ARCHIVE_INFO_SIZE * archiveList.length)
-        archiveOffsetPointer = headerSize
-        archiveList.each do |spp, points|
-          archiveInfo = [archiveOffsetPointer, spp, points].pack(ARCHIVE_INFO_FMT)
-          fh.write(archiveInfo)
-          archiveOffsetPointer += (points * POINT_SIZE)
+      if opts[:sparse]
+        fh.seek(archiveOffsetPointer - headerSize - 1)
+        fh.write("\0")
+      else
+        remaining = archiveOffsetPointer - headerSize
+        zeroes = "\x00" * CHUNK_SIZE
+        while remaining > CHUNK_SIZE
+          fh.write(zeroes)
+          remaining -= CHUNK_SIZE
         end
-
-        if opts[:sparse]
-          fh.seek(archiveOffsetPointer - headerSize - 1)
-          fh.write("\0")
-        else
-          remaining = archiveOffsetPointer - headerSize
-          zeroes = "\x00" * CHUNK_SIZE
-          while remaining > CHUNK_SIZE
-            fh.write(zeroes)
-            remaining -= CHUNK_SIZE
-          end
-          fh.write(zeroes[0..remaining])
-        end
-
-        fh.flush
-        fh.fsync rescue nil
+        fh.write(zeroes[0..remaining])
       end
 
-      new(path)
+      fh.flush
+      fh.fsync rescue nil
+      fh
     end
 
     # Is the provided archive list valid?
@@ -253,6 +282,10 @@ class Whispr
     end
   end
 
+  def closed?
+    @fh.closed?
+  end
+
   def close
     @fh.close
   end
@@ -277,6 +310,8 @@ private
           :offset => offset
         }
       end
+    rescue IOError => e
+      raise e.extend(Error)
     rescue => e
       raise CorruptWhisprFile.exception(e)
     ensure

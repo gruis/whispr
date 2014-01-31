@@ -32,6 +32,65 @@ describe Whispr do
     pending
   end
 
+  context "opening and closing a whispr archive" do
+    let(:archive) do
+      archiveList = [[10, 120]]
+      Whispr.validateArchiveList!(archiveList)
+      Whispr.new(
+        Whispr.prepopulate(StringIO.new(""), archiveList)
+      )
+    end
+    subject { archive }
+
+    it { should respond_to(:closed?) }
+    context "before calling #close" do
+      describe "#closed?" do
+        it { archive.closed?.should be false }
+      end
+      its "#update should not raise an error" do
+        expect {
+          archive.update(Time.new.to_i, 10, Time.new.to_i, 20)
+        }.to_not raise_error
+      end
+    end
+    context "after calling #close" do
+      before(:all) { archive.close }
+      its(:closed?) { should be true}
+
+      its "#update should raise an IOError" do
+        expect {
+          archive.update(Time.new.to_i, 10, Time.new.to_i, 20)
+        }.to raise_error(IOError)
+        expect {
+          archive.update(Time.new.to_i, 10)
+        }.to raise_error(IOError)
+      end
+
+      its "#update should raise a Whispr::Error" do
+        expect {
+          archive.update(Time.new.to_i, 10, Time.new.to_i, 20)
+        }.to raise_error(Whispr::Error)
+        expect {
+          archive.update(Time.new.to_i, 10)
+        }.to raise_error(Whispr::Error)
+      end
+
+      its "#fetch should raise an IOError" do
+        expect {
+          archive.fetch(Time.new - 100)
+        }.to raise_error(IOError)
+      end
+
+      its "#fetch should raise a Whispr::Error" do
+        expect {
+          archive.fetch(Time.new - 100)
+        }.to raise_error(Whispr::Error)
+      end
+
+    end
+
+  end
+
   describe "#update" do
     let(:archive) { Whispr.new(StringIO.new("")) }
     subject { archive }
