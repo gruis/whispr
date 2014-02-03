@@ -34,12 +34,15 @@ describe Whispr do
 
   context "updating values" do
     let(:archive) do
-      Whispr.create('a.wsp', '30s:6h'.split(/\s/).map{|r| Whispr.parse_retention_def(r) },
-                    :xff => 0.5, :aggregationMethod => :average)
+      archiveList = '30s:6h'.split(/\s/).map{|r| Whispr.parse_retention_def(r) }
+      Whispr.validateArchiveList!(archiveList)
+      Whispr.new(
+        Whispr.prepopulate(
+          StringIO.new(""),
+          archiveList))
     end
     let(:now) { Time.now.to_i }
     subject { archive }
-    after(:each) { File.delete('a.wsp') }
 
     context "when passing no arguments" do
       it "should not update values" do
