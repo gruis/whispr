@@ -326,7 +326,6 @@ private
   end
 
   def update_one(value, timestamp = nil)
-    $stderr.puts "update_one(#{value}, #{timestamp})"
     now       = Time.new.to_i
     timestamp = now if timestamp.nil?
     diff      = now - timestamp
@@ -336,7 +335,6 @@ private
 
     aidx = (0 ... archives.length).find { |i| archives[i].retention > diff }
     archive       = archives[aidx]
-    $stderr.puts "  using archive #{aidx}: #{archive.spp}:#{archive.points}"
     lowerArchives = archives[aidx + 1 .. - 1]
 
     myInterval    = timestamp - (timestamp % archive.spp)
@@ -368,7 +366,6 @@ private
   end
 
   def update_many(points)
-    $stderr.puts "update_many(#{points.inspect})"
     # order points by timestamp, newest first
     points   = points.each_slice(2).map{|ts, v| [ts.to_i, v.to_f ] }.sort {|b,a| a[0] <=> b[0] }
     now            = Time.new.to_i
@@ -376,7 +373,6 @@ private
     currentArchive = archives.next
     currentPoints  = []
     points.each do |point|
-      $stderr.puts "  updating #{currentPoints.inspect} in #{currentArchive.spp}:#{currentArchive.points}"
       age = now - point[0]
       while currentArchive.retention < age
         unless currentPoints.empty?
@@ -400,7 +396,6 @@ private
     if currentArchive && !currentPoints.empty?
       # don't forget to commit after we've checked all the archives
       currentPoints.reverse!
-      $stderr.puts "    updating #{currentPoints.inspect} in #{currentArchive.spp}:#{currentArchive.points}"
       currentArchive.update_many(currentPoints)
     end
 

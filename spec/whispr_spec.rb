@@ -411,6 +411,40 @@ describe Whispr do
         end
       end
     end
+
+    context "archives with realistic data" do
+      let(:archive_list) do
+        ["30s:6h", "1m:7d", "2m:30d", "4m:120d", "8m:5y"].map{ |a| Whispr.parse_retention_def(a) }
+      end
+      let(:archive) do
+        Whispr.validateArchiveList!(archive_list)
+        Whispr.new(
+          Whispr.prepopulate(
+            StringIO.new(""),
+            archive_list))
+      end
+      let(:now) { Time.new.to_i }
+      let(:values) do
+        20.times.map { |i| [now - (i * 30), rand(1000) ]}
+      end
+
+      context "when updating multiple points at once" do
+        it "should work" do
+          expect {
+            values.each_slice(10) { |slice| archive.update(*slice) }
+          }.to_not raise_error
+        end
+
+        it "should work after updating one point" do
+          archive.update([now, rand(1000)])
+          expect {
+            values.each_slice(10) { |slice| archive.update(*slice) }
+          }.to_not raise_error
+        end
+
+      end
+    end
+
   end
 
 end
