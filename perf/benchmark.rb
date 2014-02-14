@@ -2,10 +2,12 @@
 
 require 'bundler/setup'
 require 'benchmark'
+require 'fileutils'
 
 require 'whispr'
 
 data_dir     = File.expand_path("../data", __FILE__)
+FileUtils.mkdir_p data_dir
 archive_list = ["30s:6h", "1m:7d", "2m:30d", "4m:120d", "8m:5y"].map{ |a| Whispr.parse_retention_def(a) }
 whisprs      = []
 
